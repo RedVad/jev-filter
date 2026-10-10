@@ -177,7 +177,10 @@ final class Prefs {
     static String riskNote(String pkg) {
         if (pkg == null) return null;
         String q = pkg.toLowerCase(java.util.Locale.US);
-        if ((q.contains("sber") && !q.contains("sbermarket")) || q.contains("tinkoff") || q.contains("idamob")
+        // "bank" ловит и те банки, которых нет в списке ниже: Яндекс.Банк (com.yandex.bank)
+        // так и проскочил однажды к модели, хотя банковские уведомления к ней не ходят.
+        if (q.contains("bank") || (q.contains("sber") && !q.contains("sbermarket")) || q.contains("tinkoff")
+                || q.contains("idamob")
                 || q.contains("alfa") || q.contains("vtb") || q.contains("gazprom") || q.contains("rosbank")
                 || q.contains("raiffeisen") || q.contains("openbank") || q.contains("psbank") || q.contains("sovcom")
                 || q.contains("mkb") || q.contains("homecredit") || q.contains("otpbank")) {

@@ -8,6 +8,7 @@
 
     <application
         android:label="SpamGen"
+        android:icon="@mipmap/spamtest"
         android:debuggable="true"
         android:theme="@android:style/Theme.Material.Light">
 

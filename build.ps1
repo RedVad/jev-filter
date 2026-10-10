@@ -3,7 +3,8 @@
     [string]$Out,
     [string]$BuildDir,
     [string]$Sdk,
-    [string]$Jdk
+    [string]$Jdk,
+    [int]$TargetSdk = 34
 )
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
@@ -61,7 +62,7 @@ if ($hasRes) {
 
 Write-Host "== aapt2 link =="
 $linkArgs = @('link', '-o', "$build\base.apk", '-I', $ajar, '--manifest', "$app\AndroidManifest.xml",
-    '--min-sdk-version', '26', '--target-sdk-version', '34', '--version-code', '1', '--version-name', '1.0',
+    '--min-sdk-version', '26', '--target-sdk-version', "$TargetSdk", '--version-code', '1', '--version-name', '1.0',
     '--java', "$build\gen")
 if ($hasRes) { $linkArgs += @($resZip) }
 & "$bt\aapt2.exe" @linkArgs

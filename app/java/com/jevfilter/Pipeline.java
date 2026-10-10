@@ -5,6 +5,7 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.graphics.drawable.Icon;
 import android.os.Build;
 import android.os.Bundle;
 import android.service.notification.NotificationListenerService;
@@ -254,7 +255,7 @@ final class Pipeline {
                     // Сначала показываем тихую копию и убеждаемся, что она встала, и только потом
                     // убираем оригинал: notify() молчит и при отказе, а потерять уведомление
                     // совсем - худшее из возможного.
-                    if (showCopy(c, tag, id, app, title, text, original, false) && ownActive(c, tag, id)) {
+                    if (showCopy(c, tag, id, app, pkg, title, text, original, false) && ownActive(c, tag, id)) {
                         svc.cancelNotification(key);
                     } else {
                         useCopy = false;
@@ -267,7 +268,7 @@ final class Pipeline {
                 boolean shown = true;
                 if (useCopy) {
                     // без сети решить нельзя - значит не молчим
-                    shown = showCopy(c, tag, id, app, title, text, original, true);
+                    shown = showCopy(c, tag, id, app, pkg, title, text, original, true);
                 }
                 if (hidden && shown) Pending.done(c, token);
                 JeLog.add(c, "LEAVE  нет сети, решения нет [" + pkg + "] " + one(title));
@@ -292,7 +293,7 @@ final class Pipeline {
                 if (keep) {
                     // одобрено: тот же текст, но уже со звуком
                     if (hidden && active(svc, key)) svc.cancelNotification(key);
-                    if (hidden && !showCopy(c, tag, id, app, title, text, original, true)) {
+                    if (hidden && !showCopy(c, tag, id, app, pkg, title, text, original, true)) {
                         // Копию показать не удалось. Из защёлки не убираем: вернём её при
                         // следующем запуске (в пределах 15 минут), чем потеряем совсем.
                         JeLog.add(c, "копию показать не смог, верну при запуске [" + pkg + "] " + one(title));
@@ -313,7 +314,7 @@ final class Pipeline {
             // Ошибка - лучше озвучить, чем потерять. Если и показать не вышло, уведомление
             // остаётся в защёлке и вернётся при следующем запуске.
             boolean shown = true;
-            if (useCopy) shown = showCopy(c, tag, id, app, title, text, original, true);
+            if (useCopy) shown = showCopy(c, tag, id, app, pkg, title, text, original, true);
             if (hidden) {
                 if (shown) {
                     Pending.done(c, token);
@@ -369,7 +370,7 @@ final class Pipeline {
             java.util.List<Pending.Item> lost = Pending.take(c);
             if (lost.isEmpty()) return;
             for (Pending.Item it : lost) {
-                showCopy(c, it.token, Math.abs(it.token.hashCode()), it.app, it.title, it.text, null, true);
+                showCopy(c, it.token, Math.abs(it.token.hashCode()), it.app, it.pkg, it.title, it.text, null, true);
             }            JeLog.add(c, "вернул отложенные после перезапуска: " + lost.size());
         } catch (Throwable t) {
             JeLog.add(c, "не смог вернуть отложенные: " + t);
@@ -383,35 +384,72 @@ final class Pipeline {
      * копия - единственный способ не потерять уведомление, её наличие ещё проверяется в системе
      * через {@link #ownActive}.
      */
-    private static boolean showCopy(Context c, String tag, int id, String app, String title, String text,
-                                    Notification original, boolean audible) {
-        try {
-            NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
-            if (nm == null) return false;
-            channels(c);
-            Notification.Builder b = new Notification.Builder(c, audible ? CH_AUDIBLE : CH_SILENT)
-                    .setSmallIcon(R.drawable.ic_small)
-                    .setContentTitle(title.length() == 0 ? app : title)
-                    .setContentText(text)
-                    .setStyle(new Notification.BigTextStyle().bigText(text))
-                    .setSubText(app)
-                    .setAutoCancel(true)
-                    .setShowWhen(true)
-                    .setWhen(System.currentTimeMillis());
-            if (original != null) {
-                if (original.contentIntent != null) b.setContentIntent(original.contentIntent);
-                Notification.Action[] acts = original.actions;
-                if (acts != null) {
-                    for (Notification.Action a : acts) {
-                        if (a != null) b.addAction(a);
-                    }
-                }
+    private static boolean showCopy(Context c, String tag, int id, String app, String pkg, String title,
+                                    String text, Notification original, boolean audible) {
+        // Значок исходного приложения: копию постим мы, и система по умолчанию нарисует наш
+        // колокольчик, хотя уведомление чужое. Оформление - не повод рисковать содержимым,
+        // поэтому если система значок не приняла, показываем копию со своим.
+        Icon source = sourceIcon(c, pkg);
+        if (source != null) {
+            try {
+                post(c, tag, id, app, title, text, original, audible, source);
+                return true;
+            } catch (Throwable t) {
+                JeLog.add(c, "значок " + pkg + " не принят, показываю свой: " + t);
             }
-            nm.notify(tag, id, b.build());
+        }
+        try {
+            post(c, tag, id, app, title, text, original, audible, null);
             return true;
         } catch (Throwable t) {
             JeLog.add(c, "не смог показать копию: " + t);
             return false;
+        }
+    }
+
+    private static void post(Context c, String tag, int id, String app, String title, String text,
+                             Notification original, boolean audible, Icon small) throws Exception {
+        NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm == null) throw new IllegalStateException("нет NotificationManager");
+        channels(c);
+        Notification.Builder b = new Notification.Builder(c, audible ? CH_AUDIBLE : CH_SILENT)
+                .setSmallIcon(small != null ? small : Icon.createWithResource(c, R.drawable.ic_small))
+                .setContentTitle(title.length() == 0 ? app : title)
+                .setContentText(text)
+                .setStyle(new Notification.BigTextStyle().bigText(text))
+                .setSubText(app)
+                .setAutoCancel(true)
+                .setShowWhen(true)
+                .setWhen(System.currentTimeMillis());
+        if (original != null) {
+            if (original.contentIntent != null) b.setContentIntent(original.contentIntent);
+            Notification.Action[] acts = original.actions;
+            if (acts != null) {
+                for (Notification.Action a : acts) {
+                    if (a != null) b.addAction(a);
+                }
+            }
+        }
+        nm.notify(tag, id, b.build());
+    }
+
+    /**
+     * Значок приложения, чьё уведомление мы перевыкладываем.
+     *
+     * Ссылка на чужой ресурс здесь работает: значок грузит SystemUI, а он системный процесс и
+     * ресурсы любого пакета читать умеет. Свой значок был бы честнее по букве правил, но в шторке
+     * он врёт - уведомление выглядит нашим, хотя пришло из другого приложения.
+     */
+    private static Icon sourceIcon(Context c, String pkg) {
+        if (pkg == null || pkg.length() == 0) return null;
+        if (c.getPackageName().equals(pkg)) return null;
+        try {
+            android.content.pm.ApplicationInfo ai =
+                    c.getPackageManager().getApplicationInfo(pkg, 0);
+            if (ai == null || ai.icon == 0) return null;
+            return Icon.createWithResource(pkg, ai.icon);
+        } catch (Throwable t) {
+            return null;
         }
     }
 
