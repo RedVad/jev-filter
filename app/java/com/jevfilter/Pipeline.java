@@ -436,18 +436,26 @@ final class Pipeline {
     /**
      * Значок приложения, чьё уведомление мы перевыкладываем.
      *
-     * Ссылка на чужой ресурс здесь работает: значок грузит SystemUI, а он системный процесс и
-     * ресурсы любого пакета читать умеет. Свой значок был бы честнее по букве правил, но в шторке
-     * он врёт - уведомление выглядит нашим, хотя пришло из другого приложения.
+     * Ссылку на чужой ресурс ({@code Icon.createWithResource(pkg, ai.icon)}) система грузит сама,
+     * и на vivo/OriginOS такая копия в шторке всё равно остаётся с нашим значком. Поэтому значок
+     * рисуем сами в битмап и отдаём иконкой: грузить чужое системе уже не нужно, и хватает прав
+     * на чтение чужой иконки через PackageManager. Так же делает приложение Notifications
+     * (zopsoft.com.zerofall) - у него в коде createWithBitmap.
      */
     private static Icon sourceIcon(Context c, String pkg) {
         if (pkg == null || pkg.length() == 0) return null;
         if (c.getPackageName().equals(pkg)) return null;
         try {
-            android.content.pm.ApplicationInfo ai =
-                    c.getPackageManager().getApplicationInfo(pkg, 0);
-            if (ai == null || ai.icon == 0) return null;
-            return Icon.createWithResource(pkg, ai.icon);
+            android.graphics.drawable.Drawable d = c.getPackageManager().getApplicationIcon(pkg);
+            if (d == null) return null;
+            int px = (int) (c.getResources().getDisplayMetrics().density * 48f);
+            if (px < 48) px = 48;
+            android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(
+                    px, px, android.graphics.Bitmap.Config.ARGB_8888);
+            android.graphics.Canvas cv = new android.graphics.Canvas(bmp);
+            d.setBounds(0, 0, px, px);
+            d.draw(cv);
+            return Icon.createWithBitmap(bmp);
         } catch (Throwable t) {
             return null;
         }
